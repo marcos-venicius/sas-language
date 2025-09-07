@@ -20,14 +20,23 @@ CHARS_ARRAY = (
 CHARS = set(
     CHARS_ARRAY
 )
+NUMBERS = '0123456789'
 K_EOF = 'eof'
 K_SYMBOL = 'sym'
 K_LEFT_PAREN = 'lparen'
 K_RIGHT_PAREN = 'rparen'
+K_LEFT_BRACKET = 'lbracket'
+K_RIGHT_BRACKET = 'rbracket'
 K_STRING = 'str'
+K_NUMBER = 'int'
 K_SEMI_COLON = 'semicol'
+K_EQUAL = 'eq'
+K_LT = 'lt'
+K_PLUS = 'plus'
+K_PLUS_PLUS = 'plusplus'
 
 NK_FUNCTION_CALL = 'funcall'
+NK_FOR_LOOP = 'for_loop'
 
 
 def get_program_without_extension():
@@ -79,16 +88,58 @@ class T_RIGHT_PAREN(T):
         self.kind = K_RIGHT_PAREN
 
 
+class T_LEFT_BRACKET(T):
+    def __init__(self):
+        self.name = '{'
+        self.kind = K_LEFT_BRACKET
+
+
+class T_RIGHT_BRACKET(T):
+    def __init__(self):
+        self.name = '}'
+        self.kind = K_RIGHT_BRACKET
+
+
 class T_STRING(T):
     def __init__(self, name):
         self.name = name
         self.kind = K_STRING
 
 
+class T_NUMBER(T):
+    def __init__(self, value):
+        self.name = int(value)
+        self.kind = K_NUMBER
+
+
 class T_SEMI_COLON(T):
     def __init__(self):
         self.name = ';'
         self.kind = K_SEMI_COLON
+
+
+class T_EQUAL(T):
+    def __init__(self):
+        self.name = '='
+        self.kind = K_EQUAL
+
+
+class T_LT(T):
+    def __init__(self):
+        self.name = '<'
+        self.kind = K_LT
+
+
+class T_PLUS(T):
+    def __init__(self):
+        self.name = '+'
+        self.kind = K_PLUS
+
+
+class T_PLUS_PLUS(T):
+    def __init__(self):
+        self.name = '++'
+        self.kind = K_PLUS_PLUS
 
 
 class Tokenizer:
@@ -105,6 +156,12 @@ class Tokenizer:
 
         return self.content[self.cursor]
 
+    def nchr(self):
+        if self.cursor + 1 >= self.size:
+            return None
+
+        return self.content[self.cursor + 1]
+
     def advance_cursor(self):
         if self.cursor < self.size:
             self.cursor += 1
@@ -114,6 +171,9 @@ class Tokenizer:
 
     def is_symbol(self, chr):
         return chr in CHARS
+
+    def is_number(self, chr):
+        return chr in NUMBERS
 
     def trim_whitespaces(self):
         while self.chr() is not None and self.is_space(self.chr()):
@@ -130,6 +190,17 @@ class Tokenizer:
             case '(': self.tokens.append(T_LEFT_PAREN())
             case ')': self.tokens.append(T_RIGHT_PAREN())
             case ';': self.tokens.append(T_SEMI_COLON())
+            case '=': self.tokens.append(T_EQUAL())
+            case '<': self.tokens.append(T_LT())
+            case '{': self.tokens.append(T_LEFT_BRACKET())
+            case '}': self.tokens.append(T_RIGHT_BRACKET())
+            case '+':
+                if self.nchr() == '+':
+                    self.tokens.append(T_PLUS_PLUS())
+                    self.advance_cursor()
+                else:
+                    self.tokens.append(T_PLUS())
+            case _: error(f'unrecognized single token {self.chr()}')
 
         self.advance_cursor()
 
@@ -146,6 +217,12 @@ class Tokenizer:
 
         self.advance_cursor()
 
+    def tokenize_number(self):
+        while self.chr() is not None and self.is_number(self.chr()):
+            self.advance_cursor()
+
+        self.tokens.append(T_NUMBER(self.content[self.bot:self.cursor]))
+
     def tokenize(self):
         while True:
             self.trim_whitespaces()
@@ -155,9 +232,11 @@ class Tokenizer:
             if self.chr() is None:
                 self.tokens.append(T_EOF())
                 break
+            elif self.is_number(self.chr()):
+                self.tokenize_number()
             elif self.is_symbol(self.chr()):
                 self.tokenize_symbol()
-            elif self.chr() in '();':
+            elif self.chr() in '();=<+{}':
                 self.tokenize_single()
             elif self.chr() == "'":
                 self.tokenize_string()
@@ -172,6 +251,15 @@ class N_FUNCTION_CALL:
         self.name = name
         self.kind = NK_FUNCTION_CALL
         self.arguments = arguments
+
+
+class N_FOR_LOOP:
+    def __init__(self, start, end, update, body=[]):
+        self.start = start
+        self.end = end
+        self.update = update
+        self.kind = NK_FOR_LOOP
+        self.body = body
 
 
 class Parser:
@@ -196,6 +284,15 @@ class Parser:
     def next_token(self):
         self.cursor += 1
 
+    def expect_current(self, kind):
+        token = self.token()
+
+        if token is None:
+            error(f'missing token {kind}')
+
+        if self.token().kind != kind:
+            error(f'expected "{kind}" but received "{token.kind}"')
+
     def expect_next(self, kind):
         if self.cursor >= self.size:
             error(f'missing next token {kind}')
@@ -216,10 +313,54 @@ class Parser:
         self.expect_next(K_RIGHT_PAREN)
         self.expect_next(K_SEMI_COLON)
 
-        self.nodes.append(N_FUNCTION_CALL(name.name, [text.name]))
+        return N_FUNCTION_CALL(name.name, [text.name])
+
+    def parse_for_loop(self):
+        var_name = self.expect_next(K_SYMBOL)
+        self.expect_next(K_EQUAL)
+        start_value = self.expect_next(K_NUMBER)
+        self.expect_next(K_SEMI_COLON)
+        # condition. hardcoded for now
+        var_name_two = self.expect_next(K_SYMBOL)
+        self.expect_next(K_LT)
+        end_value = self.expect_next(K_NUMBER)
+        self.expect_next(K_SEMI_COLON)
+        # update. hardcoded for now
+        var_name_three = self.expect_next(K_SYMBOL)
+        self.expect_next(K_PLUS_PLUS)
+        self.expect_next(K_LEFT_BRACKET)
+        ntoken = self.ttoken()
+
+        if not (var_name.name == var_name_two.name == var_name_three.name):
+            error('inconsistence on variable name for-loop')
+
+        if ntoken is None:
+            error('missing close bracket on for-loop')
+        if ntoken.kind == K_RIGHT_BRACKET:
+            self.expect_next(K_RIGHT_BRACKET)
+
+            return N_FOR_LOOP(int(start_value.name), int(end_value.name), 'increment')
+        body = []
+        self.next_token()
+
+        while self.token() is not None and self.token().kind != K_RIGHT_BRACKET:
+            node = self.parse_expression()
+            self.next_token()
+
+            if node is None:
+                break
+
+            body.append(node)
+
+        self.expect_current(K_RIGHT_BRACKET)
+
+        return N_FOR_LOOP(int(start_value.name), int(end_value.name), 'increment', body)
 
     def parse_symbol(self):
         token = self.token()
+
+        if token.name == 'for':
+            return self.parse_for_loop()
 
         if not self.has_next_token():
             error(f'invalid use of symbol "{token.name}"')
@@ -227,20 +368,28 @@ class Parser:
         ttoken = self.ttoken()
 
         if ttoken.kind == K_LEFT_PAREN:
-            self.parse_function()
+            return self.parse_function()
+
+        error(f'unexpected syntax "{ttoken.name}"')
+
+    def parse_expression(self):
+        token = self.token()
+
+        if token.kind == K_SYMBOL:
+            return self.parse_symbol()
+        elif token.kind == K_EOF:
+            return None
         else:
-            error(f'unexpected syntax "{ttoken.name}"')
+            error(f'unrecognized symbol {token.kind}')
 
     def parse(self):
         while self.cursor < self.size:
-            token = self.token()
+            node = self.parse_expression()
 
-            if token.kind == K_SYMBOL:
-                self.parse_symbol()
-            elif token.kind == K_EOF:
+            if node is None:
                 break
             else:
-                error(f'unrecognized symbol {K_SYMBOL}')
+                self.nodes.append(node)
 
             self.next_token()
 
@@ -274,17 +423,36 @@ class Compiler:
         else:
             error(f'function "{fn.name}" does not exists')
 
+    def compile_for_loop(self, loop: N_FOR_LOOP):
+        loop_label = generate_random_string(10)
+
+        self.code.append(f'push {loop.start}')
+        self.code.append(f'{loop_label}:')
+        for node in loop.body:
+            self.compile_node(node)
+        self.code.append('pop rbx')
+        self.code.append('inc rbx')
+        self.code.append('push rbx')
+        self.code.append(f'cmp rbx,{loop.end}')
+        self.code.append(f'jl {loop_label}')
+        self.code.append('pop rbx')
+
     def exit(self):
         self.code.append('mov rax,0x3c')
         self.code.append('mov rdi,0x00')
         self.code.append('syscall')
 
+    def compile_node(self, node):
+        if node.kind == NK_FUNCTION_CALL:
+            self.compile_function_call(node)
+        elif node.kind == NK_FOR_LOOP:
+            self.compile_for_loop(node)
+        else:
+            error(f'unhandled node kind {node.kind}')
+
     def compile(self):
         for node in self.nodes:
-            if node.kind == NK_FUNCTION_CALL:
-                self.compile_function_call(node)
-            else:
-                error(f'unhandled node kind {node.kind}')
+            self.compile_node(node)
 
         self.exit()
 
