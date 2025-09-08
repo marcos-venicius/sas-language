@@ -2,6 +2,7 @@
 import os
 import random
 import subprocess
+import hashlib
 import sys
 
 program_name = sys.argv[0]
@@ -492,6 +493,28 @@ class Compiler:
             'section .data'
         ]
         self.nodes = nodes
+        self.data_references = {}
+
+    def get_string_reference(self, string, linebreak):
+        string_hash = string
+        if linebreak:
+            string_hash = string_hash + '<br/>'
+
+        hash = '_' + hashlib.sha1(string_hash.encode('utf-8')).hexdigest()[:12]
+
+        if hash in self.data_references:
+            return self.data_references[hash]
+
+        string_data_name = hash.replace('-', '')
+
+        if linebreak:
+            self.data.append(f'{string_data_name} db "{string}", 0x0A')
+        else:
+            self.data.append(f'{string_data_name} db "{string}"')
+
+        self.data_references[hash] = string_data_name
+
+        return string_data_name
 
     def compile_function_call(self, fn: N_FUNCTION_CALL):
         # builtin functions
@@ -501,9 +524,10 @@ class Compiler:
             if fn.arguments[0].kind != K_STRING:
                 error(f'print expects one argument as string but got {fn.arguments[0].kind}')
 
-            string_data_name = generate_random_string(10)
-
-            self.data.append(f'{string_data_name} db "{fn.arguments[0].value}", 0x0A')
+            string_data_name = self.get_string_reference(
+                fn.arguments[0].value,
+                True
+            )
 
             self.code.append('mov rax,0x01')
             self.code.append('mov rdi,0x01')
@@ -516,9 +540,10 @@ class Compiler:
             if fn.arguments[0].kind != K_STRING:
                 error(f'print expects one argument as string but got {fn.arguments[0].kind}')
 
-            string_data_name = generate_random_string(10)
-
-            self.data.append(f'{string_data_name} db "{fn.arguments[0].value}"')
+            string_data_name = self.get_string_reference(
+                fn.arguments[0].value,
+                False
+            )
 
             self.code.append('mov rax,0x01')
             self.code.append('mov rdi,0x01')
