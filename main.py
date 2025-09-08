@@ -30,10 +30,14 @@ K_RIGHT_BRACKET = 'rbracket'
 K_STRING = 'str'
 K_NUMBER = 'int'
 K_SEMI_COLON = 'semicol'
-K_EQUAL = 'eq'
+K_EQUAL = 'equal'
 K_LT = 'lt'
+K_GT = 'gt'
+K_EQ = 'eq'
+K_NOTEQ = 'neq'
 K_PLUS = 'plus'
 K_PLUS_PLUS = 'plusplus'
+K_MINUS_MINUS = 'minusminus'
 
 NK_FUNCTION_CALL = 'funcall'
 NK_FOR_LOOP = 'for_loop'
@@ -130,6 +134,24 @@ class T_LT(T):
         self.kind = K_LT
 
 
+class T_GT(T):
+    def __init__(self):
+        self.name = '>'
+        self.kind = K_GT
+
+
+class T_NOTEQ(T):
+    def __init__(self):
+        self.name = '!='
+        self.kind = K_NOTEQ
+
+
+class T_EQ(T):
+    def __init__(self):
+        self.name = '=='
+        self.kind = K_EQ
+
+
 class T_PLUS(T):
     def __init__(self):
         self.name = '+'
@@ -140,6 +162,12 @@ class T_PLUS_PLUS(T):
     def __init__(self):
         self.name = '++'
         self.kind = K_PLUS_PLUS
+
+
+class T_MINUS_MINUS(T):
+    def __init__(self):
+        self.name = '--'
+        self.kind = K_MINUS_MINUS
 
 
 class Tokenizer:
@@ -190,10 +218,28 @@ class Tokenizer:
             case '(': self.tokens.append(T_LEFT_PAREN())
             case ')': self.tokens.append(T_RIGHT_PAREN())
             case ';': self.tokens.append(T_SEMI_COLON())
-            case '=': self.tokens.append(T_EQUAL())
+            case '=':
+                if self.nchr() == '=':
+                    self.tokens.append(T_EQ())
+                    self.advance_cursor()
+                else:
+                    self.tokens.append(T_EQUAL())
             case '<': self.tokens.append(T_LT())
+            case '>': self.tokens.append(T_GT())
+            case '!':
+                if self.nchr() == '=':
+                    self.tokens.append(T_NOTEQ())
+                    self.advance_cursor()
+                else:
+                    error(f'unrecognized character {self.chr()}')
             case '{': self.tokens.append(T_LEFT_BRACKET())
             case '}': self.tokens.append(T_RIGHT_BRACKET())
+            case '-':
+                if self.nchr() == '-':
+                    self.tokens.append(T_MINUS_MINUS())
+                    self.advance_cursor()
+                else:
+                    error(f'unrecognized character {self.chr()}')
             case '+':
                 if self.nchr() == '+':
                     self.tokens.append(T_PLUS_PLUS())
@@ -223,6 +269,10 @@ class Tokenizer:
 
         self.tokens.append(T_NUMBER(self.content[self.bot:self.cursor]))
 
+    def trim_comment(self):
+        while self.chr() is not None and self.chr() != '\n':
+            self.advance_cursor()
+
     def tokenize(self):
         while True:
             self.trim_whitespaces()
@@ -232,11 +282,13 @@ class Tokenizer:
             if self.chr() is None:
                 self.tokens.append(T_EOF())
                 break
+            elif self.chr() == '#':
+                self.trim_comment()
             elif self.is_number(self.chr()):
                 self.tokenize_number()
             elif self.is_symbol(self.chr()):
                 self.tokenize_symbol()
-            elif self.chr() in '();=<+{}':
+            elif self.chr() in '();=<>+{}!-':
                 self.tokenize_single()
             elif self.chr() == "'":
                 self.tokenize_string()
@@ -246,17 +298,24 @@ class Tokenizer:
         return self.tokens
 
 
+class N_FUNCTION_CALL_ARG:
+    def __init__(self, value, kind):
+        self.value = value
+        self.kind = kind
+
+
 class N_FUNCTION_CALL:
-    def __init__(self, name, arguments):
+    def __init__(self, name, arguments: list[N_FUNCTION_CALL_ARG]):
         self.name = name
         self.kind = NK_FUNCTION_CALL
         self.arguments = arguments
 
 
 class N_FOR_LOOP:
-    def __init__(self, start, end, update, body=[]):
+    def __init__(self, start, condition, end, update, body=[]):
         self.start = start
         self.end = end
+        self.condition = condition
         self.update = update
         self.kind = NK_FOR_LOOP
         self.body = body
@@ -293,53 +352,73 @@ class Parser:
         if self.token().kind != kind:
             error(f'expected "{kind}" but received "{token.kind}"')
 
-    def expect_next(self, kind):
+    def expect_next(self, *kinds):
         if self.cursor >= self.size:
-            error(f'missing next token {kind}')
+            error(f'missing next token {" or ".join(kinds)}')
 
         nxt = self.tokens[self.cursor + 1]
 
-        if nxt.kind != kind:
-            error(f'expected "{kind}" but received "{nxt.kind}"')
+        found = False
+        for kind in kinds:
+            if nxt.kind == kind:
+                found = True
+                break
+
+        if not found:
+            error(f'expected "{" or ".join(kinds)}" but received "{nxt.kind}"')
 
         self.next_token()
 
         return nxt
 
-    def parse_function(self):
+    def parse_function_call(self):
         name = self.token()
         self.expect_next(K_LEFT_PAREN)
-        text = self.expect_next(K_STRING)
-        self.expect_next(K_RIGHT_PAREN)
+
+        self.next_token()
+
+        arguments = []
+
+        while self.token() is not None and self.token().kind != K_RIGHT_PAREN:
+            token = self.token()
+
+            if token.kind == K_STRING:
+                arguments.append(N_FUNCTION_CALL_ARG(token.name, K_STRING))
+            elif token.kind == K_NUMBER:
+                arguments.append(N_FUNCTION_CALL_ARG(token.name, K_NUMBER))
+            else:
+                error(f'unhandled data type {token.kind}')
+
+            self.next_token()
+
+        self.expect_current(K_RIGHT_PAREN)
         self.expect_next(K_SEMI_COLON)
 
-        return N_FUNCTION_CALL(name.name, [text.name])
+        return N_FUNCTION_CALL(name.name, arguments)
 
     def parse_for_loop(self):
-        var_name = self.expect_next(K_SYMBOL)
-        self.expect_next(K_EQUAL)
         start_value = self.expect_next(K_NUMBER)
         self.expect_next(K_SEMI_COLON)
         # condition. hardcoded for now
-        var_name_two = self.expect_next(K_SYMBOL)
-        self.expect_next(K_LT)
+        condition = self.expect_next(K_LT, K_GT, K_EQ, K_NOTEQ)
         end_value = self.expect_next(K_NUMBER)
         self.expect_next(K_SEMI_COLON)
         # update. hardcoded for now
-        var_name_three = self.expect_next(K_SYMBOL)
-        self.expect_next(K_PLUS_PLUS)
+        update = self.expect_next(K_PLUS_PLUS, K_MINUS_MINUS)
         self.expect_next(K_LEFT_BRACKET)
         ntoken = self.ttoken()
-
-        if not (var_name.name == var_name_two.name == var_name_three.name):
-            error('inconsistence on variable name for-loop')
 
         if ntoken is None:
             error('missing close bracket on for-loop')
         if ntoken.kind == K_RIGHT_BRACKET:
             self.expect_next(K_RIGHT_BRACKET)
 
-            return N_FOR_LOOP(int(start_value.name), int(end_value.name), 'increment')
+            return N_FOR_LOOP(
+                int(start_value.name),
+                condition.kind,
+                int(end_value.name),
+                update.kind
+            )
         body = []
         self.next_token()
 
@@ -354,7 +433,13 @@ class Parser:
 
         self.expect_current(K_RIGHT_BRACKET)
 
-        return N_FOR_LOOP(int(start_value.name), int(end_value.name), 'increment', body)
+        return N_FOR_LOOP(
+            int(start_value.name),
+            condition.kind,
+            int(end_value.name),
+            update.kind,
+            body
+        )
 
     def parse_symbol(self):
         token = self.token()
@@ -368,7 +453,7 @@ class Parser:
         ttoken = self.ttoken()
 
         if ttoken.kind == K_LEFT_PAREN:
-            return self.parse_function()
+            return self.parse_function_call()
 
         error(f'unexpected syntax "{ttoken.name}"')
 
@@ -410,15 +495,44 @@ class Compiler:
 
     def compile_function_call(self, fn: N_FUNCTION_CALL):
         # builtin functions
-        if fn.name == 'print':
+        if fn.name == 'println':
+            if len(fn.arguments) != 1:
+                error(f'print expects only one argument but got {len(fn.arguments)}')
+            if fn.arguments[0].kind != K_STRING:
+                error(f'print expects one argument as string but got {fn.arguments[0].kind}')
+
             string_data_name = generate_random_string(10)
 
-            self.data.append(f'{string_data_name} db "{fn.arguments[0]}", 0x0A')
+            self.data.append(f'{string_data_name} db "{fn.arguments[0].value}", 0x0A')
 
             self.code.append('mov rax,0x01')
             self.code.append('mov rdi,0x01')
             self.code.append(f'mov rsi,{string_data_name}')
-            self.code.append(f'mov rdx,{len(fn.arguments[0]) + 1}')
+            self.code.append(f'mov rdx,{len(fn.arguments[0].value) + 1}')
+            self.code.append('syscall')
+        elif fn.name == 'print':
+            if len(fn.arguments) != 1:
+                error(f'print expects only one argument but got {len(fn.arguments)}')
+            if fn.arguments[0].kind != K_STRING:
+                error(f'print expects one argument as string but got {fn.arguments[0].kind}')
+
+            string_data_name = generate_random_string(10)
+
+            self.data.append(f'{string_data_name} db "{fn.arguments[0].value}"')
+
+            self.code.append('mov rax,0x01')
+            self.code.append('mov rdi,0x01')
+            self.code.append(f'mov rsi,{string_data_name}')
+            self.code.append(f'mov rdx,{len(fn.arguments[0].value)}')
+            self.code.append('syscall')
+        elif fn.name == 'exit':
+            if len(fn.arguments) != 1:
+                error(f'exit expects only one argument but got {len(fn.arguments)}')
+            if fn.arguments[0].kind != K_NUMBER:
+                error(f'exit expects one argument as number but got {fn.arguments[0].kind}')
+
+            self.code.append('mov rax,0x3c')
+            self.code.append(f'mov rdi,{fn.arguments[0].value}')
             self.code.append('syscall')
         else:
             error(f'function "{fn.name}" does not exists')
@@ -431,10 +545,22 @@ class Compiler:
         for node in loop.body:
             self.compile_node(node)
         self.code.append('pop rbx')
-        self.code.append('inc rbx')
+        if loop.update == K_PLUS_PLUS:
+            self.code.append('inc rbx')
+        elif loop.update == K_MINUS_MINUS:
+            self.code.append('dec rbx')
         self.code.append('push rbx')
         self.code.append(f'cmp rbx,{loop.end}')
-        self.code.append(f'jl {loop_label}')
+        if loop.condition == K_EQ:
+            self.code.append(f'je {loop_label}')
+        elif loop.condition == K_NOTEQ:
+            self.code.append(f'jne {loop_label}')
+        elif loop.condition == K_LT:
+            self.code.append(f'jl {loop_label}')
+        elif loop.condition == K_GT:
+            self.code.append(f'jg {loop_label}')
+        else:
+            error(f'invalid condition {loop.condition}')
         self.code.append('pop rbx')
 
     def exit(self):
