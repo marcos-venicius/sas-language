@@ -42,6 +42,7 @@ K_MINUS_MINUS = 'minusminus'
 
 NK_FUNCTION_CALL = 'funcall'
 NK_FOR_LOOP = 'for_loop'
+NK_IF_STATEMENT = 'if'
 
 
 def get_program_without_extension():
@@ -313,12 +314,22 @@ class N_FUNCTION_CALL:
 
 
 class N_FOR_LOOP:
-    def __init__(self, start, condition, end, update, body=[]):
+    def __init__(self, var_name, start, condition, end, update, body=[]):
+        self.var_name = var_name
         self.start = start
         self.end = end
         self.condition = condition
         self.update = update
         self.kind = NK_FOR_LOOP
+        self.body = body
+
+
+class N_IF_STATEMENT:
+    def __init__(self, var_name, operator, value, body):
+        self.kind = NK_IF_STATEMENT
+        self.var_name = var_name
+        self.operator = operator
+        self.value = value
         self.body = body
 
 
@@ -399,7 +410,14 @@ class Parser:
 
     def parse_for_loop(self):
         start_value = self.expect_next(K_NUMBER)
-        self.expect_next(K_SEMI_COLON)
+        az = self.expect_next(K_SEMI_COLON, K_SYMBOL)
+        var_name = None
+        if az.kind == K_SYMBOL:
+            if az.name != 'as':
+                error(f'invalid syntax {az.name}')
+
+            var_name = self.expect_next(K_SYMBOL)
+            self.expect_next(K_SEMI_COLON)
         # condition. hardcoded for now
         condition = self.expect_next(K_LT, K_GT, K_EQ, K_NOTEQ)
         end_value = self.expect_next(K_NUMBER)
@@ -409,17 +427,14 @@ class Parser:
         self.expect_next(K_LEFT_BRACKET)
         ntoken = self.ttoken()
 
+        var_name = var_name.name if var_name is not None else None
+
         if ntoken is None:
             error('missing close bracket on for-loop')
         if ntoken.kind == K_RIGHT_BRACKET:
             self.expect_next(K_RIGHT_BRACKET)
+            return None
 
-            return N_FOR_LOOP(
-                int(start_value.name),
-                condition.kind,
-                int(end_value.name),
-                update.kind
-            )
         body = []
         self.next_token()
 
@@ -428,17 +443,56 @@ class Parser:
             self.next_token()
 
             if node is None:
-                break
+                continue
 
             body.append(node)
 
         self.expect_current(K_RIGHT_BRACKET)
 
         return N_FOR_LOOP(
+            var_name,
             int(start_value.name),
             condition.kind,
             int(end_value.name),
             update.kind,
+            body
+        )
+
+    def parse_if(self):
+        # For now, it's hard coded syntax <symbol> <operator> <number>
+        var_name = self.expect_next(K_SYMBOL)
+        operator = self.expect_next(K_GT, K_LT)
+        value = self.expect_next(K_NUMBER)
+        self.expect_next(K_LEFT_BRACKET)
+
+        ttoken = self.ttoken()
+
+        if ttoken is None:
+            error('missing close bracket on if-statement')
+        if ttoken.kind == K_RIGHT_BRACKET:
+            self.expect_next(K_RIGHT_BRACKET)
+
+            return None
+
+        body = []
+
+        self.next_token()
+
+        while self.token() is not None and self.token().kind != K_RIGHT_BRACKET:
+            node = self.parse_expression()
+            self.next_token()
+
+            if node is None:
+                continue
+
+            body.append(node)
+
+        self.expect_current(K_RIGHT_BRACKET)
+
+        return N_IF_STATEMENT(
+            var_name.name,
+            operator.kind,
+            value.name,
             body
         )
 
@@ -447,6 +501,8 @@ class Parser:
 
         if token.name == 'for':
             return self.parse_for_loop()
+        if token.name == 'if':
+            return self.parse_if()
 
         if not self.has_next_token():
             error(f'invalid use of symbol "{token.name}"')
@@ -472,12 +528,12 @@ class Parser:
         while self.cursor < self.size:
             node = self.parse_expression()
 
+            self.next_token()
+
             if node is None:
-                break
+                continue
             else:
                 self.nodes.append(node)
-
-            self.next_token()
 
         return self.nodes
 
@@ -494,6 +550,7 @@ class Compiler:
         ]
         self.nodes = nodes
         self.data_references = {}
+        self.var_to_reg = {}
 
     def get_string_reference(self, string, linebreak):
         string_hash = string
@@ -516,7 +573,7 @@ class Compiler:
 
         return string_data_name
 
-    def compile_function_call(self, fn: N_FUNCTION_CALL):
+    def compile_function_call(self, fn: N_FUNCTION_CALL, scope):
         # builtin functions
         if fn.name == 'println':
             if len(fn.arguments) != 1:
@@ -562,13 +619,21 @@ class Compiler:
         else:
             error(f'function "{fn.name}" does not exists')
 
-    def compile_for_loop(self, loop: N_FOR_LOOP):
+    def compile_for_loop(self, loop: N_FOR_LOOP, scope):
         loop_label = generate_random_string(10)
+
+        if loop_label not in self.var_to_reg:
+            self.var_to_reg[loop_label] = {}
+
+        if loop.var_name is not None:
+            self.var_to_reg[loop_label][loop.var_name] = 'rcx'
 
         self.code.append(f'push {loop.start}')
         self.code.append(f'{loop_label}:')
+        self.code.append('pop rcx')
+        self.code.append('push rcx')
         for node in loop.body:
-            self.compile_node(node)
+            self.compile_node(node, loop_label)
         self.code.append('pop rbx')
         if loop.update == K_PLUS_PLUS:
             self.code.append('inc rbx')
@@ -588,22 +653,41 @@ class Compiler:
             error(f'invalid condition {loop.condition}')
         self.code.append('pop rbx')
 
+    def compile_if(self, node: N_IF_STATEMENT, scope):
+        if node.var_name not in self.var_to_reg[scope]:
+            error(f'variable "{node.var_name}" not found')
+
+        reg = self.var_to_reg[scope][node.var_name]
+
+        end_if_label = generate_random_string(10)
+
+        self.code.append(f'cmp {reg},{node.value}')
+        if node.operator == K_LT:
+            self.code.append(f'jge {end_if_label}')
+        elif node.operator == K_GT:
+            self.code.append(f'jle {end_if_label}')
+        for node in node.body:
+            self.compile_node(node, scope)
+        self.code.append(f'{end_if_label}:')
+
     def exit(self):
         self.code.append('mov rax,0x3c')
         self.code.append('mov rdi,0x00')
         self.code.append('syscall')
 
-    def compile_node(self, node):
+    def compile_node(self, node, scope):
         if node.kind == NK_FUNCTION_CALL:
-            self.compile_function_call(node)
+            self.compile_function_call(node, scope)
         elif node.kind == NK_FOR_LOOP:
-            self.compile_for_loop(node)
+            self.compile_for_loop(node, scope)
+        elif node.kind == NK_IF_STATEMENT:
+            self.compile_if(node, scope)
         else:
             error(f'unhandled node kind {node.kind}')
 
     def compile(self):
         for node in self.nodes:
-            self.compile_node(node)
+            self.compile_node(node, 'root')
 
         self.exit()
 
