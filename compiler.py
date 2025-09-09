@@ -331,6 +331,7 @@ class N_IF_STATEMENT:
         self.operator = operator
         self.value = value
         self.body = body
+        self.elze_block = []
 
 
 class Parser:
@@ -489,12 +490,36 @@ class Parser:
 
         self.expect_current(K_RIGHT_BRACKET)
 
-        return N_IF_STATEMENT(
+        iv = N_IF_STATEMENT(
             var_name.name,
             operator.kind,
             value.name,
             body
         )
+
+        if self.ttoken().kind == K_SYMBOL and self.ttoken().name == 'else':
+            self.expect_next(K_SYMBOL)
+            self.expect_next(K_LEFT_BRACKET)
+
+            if self.ttoken().kind == K_RIGHT_BRACKET:
+                self.expect_next(K_RIGHT_BRACKET)
+
+                return iv
+
+            self.next_token()
+
+            while self.token() is not None and self.token().kind != K_RIGHT_BRACKET:
+                node = self.parse_expression()
+                self.next_token()
+
+                if node is None:
+                    continue
+
+                iv.elze_block.append(node)
+
+            self.expect_current(K_RIGHT_BRACKET)
+
+        return iv
 
     def parse_symbol(self):
         token = self.token()
@@ -666,9 +691,19 @@ class Compiler:
             self.code.append(f'jge {end_if_label}')
         elif node.operator == K_GT:
             self.code.append(f'jle {end_if_label}')
-        for node in node.body:
-            self.compile_node(node, scope)
-        self.code.append(f'{end_if_label}:')
+        for child in node.body:
+            self.compile_node(child, scope)
+
+        if len(node.elze_block) > 0:
+            end_else_label = generate_random_string(10)
+
+            self.code.append(f'jmp {end_else_label}')
+            self.code.append(f'{end_if_label}:')
+            for child in node.elze_block:
+                self.compile_node(child, scope)
+            self.code.append(f'{end_else_label}:')
+        else:
+            self.code.append(f'{end_if_label}:')
 
     def exit(self):
         self.code.append('mov rax,0x3c')

@@ -6,14 +6,12 @@ for 0; < 12; ++ {
 
 println('');
 
-for 0; < 5; ++ {
+for 0 as j; < 5; ++ {
   print('|');
   for 0 as i; < 10; ++ {
     if i > 4 {
       print('G');
-    }
-
-    if i < 5 {
+    } else {
       print('L');
     }
   }
