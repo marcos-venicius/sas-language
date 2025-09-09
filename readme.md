@@ -8,7 +8,7 @@ It's a compiled language written in python and compiled to native x86_64 format
 
 Right bellow we have a very simple example of the syntax:
 
-```ts
+```elixir
 for 0; < 5; ++ {
   print('|');
   for 0 as i; < 10; ++ {
