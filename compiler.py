@@ -26,13 +26,54 @@ from utils import error, generate_random_string
 from lexer import Tokenizer
 from parser import Parser
 
-program_name = sys.argv[0]
+arg_index = 0
 
-if len(sys.argv) != 2:
-    print(f'usage: {program_name} program.sas')
+
+def shift():
+    global arg_index
+    if arg_index >= len(sys.argv):
+        return None
+
+    arg_index += 1
+
+    return sys.argv[arg_index - 1]
+
+
+program_name = shift()
+input_file = shift()
+
+if input_file is None:
+    print(f'usage: {program_name} <filename> [flags]')
+    print('  -o         output filename')
     exit(1)
 
-input_file = sys.argv[1]
+flags = {}
+
+
+def get_flag(name):
+    if name in flags:
+        return flags[name]
+
+    return None
+
+
+while True:
+    flag = shift()
+
+    if flag is None:
+        break
+
+    match flag:
+        case "-o":
+            value = shift()
+
+            if value is None:
+                print('missing value for flag -o')
+                exit(1)
+
+            flags['-o'] = value
+        case _:
+            print(f'unrecognized flag "{flag}"')
 
 
 def get_program_without_extension():
@@ -210,7 +251,7 @@ class Compiler:
         tmp_file_name = generate_random_string(12)
         tmp_file_path = f'/tmp/{tmp_file_name}'
         tmp_out_file_path = f'/tmp/{tmp_file_name}.o'
-        compiled_name = get_program_without_extension()
+        compiled_name = get_flag('-o') or get_program_without_extension()
 
         with open(tmp_file_path, 'w') as f:
             for line in self.code:
