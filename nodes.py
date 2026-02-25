@@ -1,4 +1,4 @@
-from constants import NK_FUNCTION_CALL, NK_FOR_LOOP, NK_IF_STATEMENT
+from constants import NK_FUNCTION_CALL, NK_FOR_LOOP, NK_IF_STATEMENT, NK_FN
 
 
 class N_FUNCTION_CALL_ARG:
@@ -13,6 +13,11 @@ class N_FUNCTION_CALL:
         self.kind = NK_FUNCTION_CALL
         self.arguments = arguments
 
+class N_FN:
+    def __init__(self, name, body=[]):
+        self.name = name
+        self.kind = NK_FN
+        self.body = body
 
 class N_FOR_LOOP:
     def __init__(self, var_name, start, condition, end, update, body=[]):

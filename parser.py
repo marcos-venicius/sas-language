@@ -20,7 +20,8 @@ from nodes import (
     N_FUNCTION_CALL,
     N_FUNCTION_CALL_ARG,
     N_IF_STATEMENT,
-    N_FOR_LOOP
+    N_FOR_LOOP,
+    N_FN
 )
 from utils import error
 
@@ -212,6 +213,41 @@ class Parser:
 
         return iv
 
+    def parse_fn(self):
+        fn_name = self.expect_next(K_SYMBOL)
+        self.expect_next(K_LEFT_PAREN)
+        self.expect_next(K_RIGHT_PAREN)
+        self.expect_next(K_LEFT_BRACKET)
+
+        if self.ttoken().kind == K_RIGHT_BRACKET:
+            self.expect_next(K_RIGHT_BRACKET)
+
+            return N_FN(
+                fn_name.name,
+                []
+            )
+
+        self.next_token()
+
+        body = []
+
+        while self.token() is not None and self.token().kind != K_RIGHT_BRACKET:
+            node = self.parse_expression()
+            self.next_token()
+
+            if node is None:
+                raise Exception('this check should never occur')
+
+            body.append(node)
+
+        self.expect_current(K_RIGHT_BRACKET)
+
+        return N_FN(
+            fn_name.name,
+            body
+        )
+
+
     def parse_symbol(self):
         token = self.token()
 
@@ -219,6 +255,8 @@ class Parser:
             return self.parse_for_loop()
         if token.name == 'if':
             return self.parse_if()
+        if token.name == 'fn':
+            return self.parse_fn()
 
         if not self.has_next_token():
             error(f'invalid use of symbol "{token.name}"')
