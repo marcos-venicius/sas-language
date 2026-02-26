@@ -24,23 +24,37 @@ for 0; < 12; ++ {
 
 println('');
 
-# println('Depth-1 loop');
-# 
-# for 10; > 0; -- {
-#   println('10 lines');
-# }
-# 
-# println('Nested loops:');
-# 
-# for 2; != 4; ++ {
-#   println('First:');
-# 
-#   for 0; < 2; ++ {
-#     println('  Second:');
-# 
-#     for 0; < 2; ++ {
-#       println('    + First item');
-#       println('    + Second item. Same level');
-#     }
-#   }
-# }
+println('Depth-1 loop');
+
+for 10; > 0; -- {
+  println('10 lines');
+}
+
+println('Nested loops:');
+
+# the order of the functions matter. It is like C
+
+fn displayNestedPrints() {
+  println('    + First item');
+  println('    + Second item. Same level');
+}
+
+fn displayFirstLevel() {
+  for 0; < 2; ++ {
+    println('  Second:');
+
+    for 0; < 2; ++ {
+      displayNestedPrints();
+    }
+  }
+}
+
+fn thatIsAnEmptyFunction() {}
+
+for 2; != 4; ++ {
+  println('First:');
+
+  displayFirstLevel();
+}
+
+thatIsAnEmptyFunction();

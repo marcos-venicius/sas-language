@@ -325,9 +325,8 @@ class Compiler:
         if link_code != 0:
             error(f'linking failed with return code {link_code}')
 
-        print(tmp_file_path)
-        # os.remove(tmp_file_path)
-        # os.remove(tmp_out_file_path)
+        os.remove(tmp_file_path)
+        os.remove(tmp_out_file_path)
 
 
 content = open(input_file, 'r').read()
